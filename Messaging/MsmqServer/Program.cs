@@ -10,80 +10,30 @@ namespace MsmqServer
     public class Program
     {
         private const string MessageQueueName = @".\private$\TestMessageQueue";
-        private const string FolderPath = @"C:\Users\Yurii_Kyselov\ServerFolder";
 
         private static MessageQueue _messageQueue;
 
         private static void Main(string[] args)
         {
-            _messageQueue = MessageQueue.Exists(MessageQueueName) ? new MessageQueue(MessageQueueName) : MessageQueue.Create(MessageQueueName, true);
+            var cts = new CancellationTokenSource();
+            var token = cts.Token;
+            var task = FileServer.Run(MessageQueueName, token);
 
-            _messageQueue.Formatter = new XmlMessageFormatter(new Type[] { typeof(byte[]) });
-            _messageQueue.MessageReadPropertyFilter = new MessagePropertyFilter
-            {
-                IsLastInTransaction = true,
-                Label = true,
-                Body = true,
-            };
-
-            Task.Run(Worker);
-
+            Console.WriteLine("Press ANY key to exit:");
             Console.ReadLine();
+            cts.Cancel();
 
-        }
-
-        static void Worker()
-        {
-            while (true)
+            try
             {
-                using (var trans = new MessageQueueTransaction())
-                {
-                    Stream stream = null;
-                    try
-                    {
-                        var fileName = string.Empty;
-
-                        trans.Begin();
-                        Message message;
-                        while ((message = _messageQueue.Receive(trans)) != null)
-                        {
-                            if(stream == null)
-                            {
-                                fileName = message.Label;
-                                Console.WriteLine($"Start reading ({fileName})");
-                                stream = new FileStream($"{FolderPath}\\{fileName}", FileMode.Create, FileAccess.Write);
-                            }
-
-                            WriteToStream(stream, (byte[])message.Body);
-                            if (message.IsLastInTransaction)
-                            {
-                                break;
-                            }
-                        }
-
-                        Console.WriteLine($"End reading ({fileName})");
-
-                        stream.Dispose();
-                        trans.Commit();
-                    }
-                    catch (MessageQueueException e)
-                    {
-                        if (e.MessageQueueErrorCode == MessageQueueErrorCode.TransactionUsage)
-                        {
-                            Console.WriteLine("Something is wrong. Queue is not in transactional mode.");
-                        }
-
-                        trans.Abort();
-                    }
-                }
+                task.Wait();
             }
-        }
-
-        private static void WriteToStream(Stream stream, IEnumerable<byte> bytes)
-        {
-            foreach (byte @byte in bytes)
+            catch (TaskCanceledException)
             {
-                stream.WriteByte(@byte);
+                // igone
+            }
+            finally
+            {
+                Console.WriteLine("Server ended");
             }
         }
     }
